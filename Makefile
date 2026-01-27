@@ -19,25 +19,25 @@ test-all: test-unit test-tofu test-integration
 # Run BATS unit tests
 test-unit:
 ifdef MODULE
-	@./testing/run_bats_tests.sh $(MODULE)
+	@./run_bats_tests.sh $(MODULE)
 else
-	@./testing/run_bats_tests.sh
+	@./run_bats_tests.sh
 endif
 
 # Run OpenTofu tests
 test-tofu:
 ifdef MODULE
-	@./testing/run_tofu_tests.sh $(MODULE)
+	@./run_tofu_tests.sh $(MODULE)
 else
-	@./testing/run_tofu_tests.sh
+	@./run_tofu_tests.sh
 endif
 
 # Run integration tests
 test-integration:
 ifdef MODULE
-	@./testing/run_integration_tests.sh $(MODULE) $(if $(VERBOSE),-v)
+	@./run_integration_tests.sh $(MODULE) $(if $(VERBOSE),-v)
 else
-	@./testing/run_integration_tests.sh $(if $(VERBOSE),-v)
+	@./run_integration_tests.sh $(if $(VERBOSE),-v)
 endif
 
 # Help
