@@ -70,7 +70,7 @@ Our testing strategy follows a pyramid approach with three distinct layers, each
 This repository is designed to be included as a [Git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) in your project. To add it, run:
 
 ```bash
-git submodule add https://github.com/nullplatform/scope-testing.git testing
+git submodule add git@github.com:nullplatform/scope-testing.git testing
 ```
 
 This will clone the repository into a `testing/` directory within your project.
@@ -87,10 +87,10 @@ Or in one step when cloning:
 git clone --recurse-submodules <your-repository-url>
 ```
 
-Then, copy the Makefile to your project root so you can run test commands directly:
+Then, run tests from your project root using `make -C testing`:
 
 ```bash
-cp testing/Makefile Makefile.scopetest
+make -C testing test-all
 ```
 
 ---
@@ -110,20 +110,20 @@ cp testing/Makefile Makefile.scopetest
 
 ```bash
 # Show available test commands
-make -f Makefile.scopetest test
+make -C testing test
 
 # Run all test suites
-make -f Makefile.scopetest test-all
+make -C testing test-all
 
 # Run individual test suites
-make -f Makefile.scopetest test-unit
-make -f Makefile.scopetest test-tofu
-make -f Makefile.scopetest test-integration
+make -C testing test-unit
+make -C testing test-tofu
+make -C testing test-integration
 
 # Run tests for a specific module
-make -f Makefile.scopetest test-unit MODULE=frontend
-make -f Makefile.scopetest test-tofu MODULE=frontend
-make -f Makefile.scopetest test-integration MODULE=frontend
+make -C testing test-unit MODULE=frontend
+make -C testing test-tofu MODULE=frontend
+make -C testing test-integration MODULE=frontend
 
 # Run a single test file directly
 bats frontend/deployment/tests/build_context_test.bats
