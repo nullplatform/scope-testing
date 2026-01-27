@@ -52,8 +52,8 @@ services:
   # =============================================================================
   azure-mock:
     build:
-      context: ./azure-mock
-      dockerfile: Dockerfile
+      context: azure-mock
+      dockerfile: azure-mock/Dockerfile
     container_name: integration-azure-mock
     ports:
       - "8090:8080"
