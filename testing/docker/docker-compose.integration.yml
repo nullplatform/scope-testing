@@ -1,0 +1,182 @@
+services:
+  # =============================================================================
+  # LocalStack - AWS services emulator (S3, Route53, DynamoDB, etc.)
+  # =============================================================================
+  localstack:
+    image: localstack/localstack:latest
+    container_name: integration-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - DEBUG=0
+      - SERVICES=s3,route53,sts,iam,dynamodb,acm
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - PERSISTENCE=0
+      - EAGER_SERVICE_LOADING=1
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.2
+
+  # =============================================================================
+  # Moto - CloudFront emulator (LocalStack doesn't support CloudFront well)
+  # =============================================================================
+  moto:
+    image: motoserver/moto:latest
+    container_name: integration-moto
+    ports:
+      - "5555:5000"
+    environment:
+      - MOTO_PORT=5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/moto-api/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.3
+
+  # =============================================================================
+  # Azure Mock - Azure REST API mock server for CDN, DNS, Storage
+  # =============================================================================
+  azure-mock:
+    build:
+      context: ./azure-mock
+      dockerfile: Dockerfile
+    container_name: integration-azure-mock
+    ports:
+      - "8090:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.4
+
+  # =============================================================================
+  # Smocker - API mock server for nullplatform API
+  # =============================================================================
+  smocker:
+    image: thiht/smocker:latest
+    container_name: integration-smocker
+    ports:
+      - "8080:8080"   # Mock server port (HTTP)
+      - "8081:8081"   # Admin API port (configure mocks)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.11
+
+  # =============================================================================
+  # Nginx - HTTPS reverse proxy for smocker (np CLI requires HTTPS)
+  # =============================================================================
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: integration-nginx
+    ports:
+      - "8443:443"    # HTTPS port for np CLI
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/certs:ro
+    depends_on:
+      - smocker
+      - azure-mock
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:443/mocks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.10
+
+  # =============================================================================
+  # Test Runner - Container that runs the integration tests
+  # =============================================================================
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+    container_name: integration-test-runner
+    environment:
+      # Terminal for BATS pretty formatter
+      - TERM=xterm-256color
+      # nullplatform CLI configuration
+      - NULLPLATFORM_API_KEY=test-api-key
+      # AWS Configuration - point to LocalStack
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - MOTO_ENDPOINT=http://moto:5000
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_PAGER=
+      # Smocker configuration
+      - SMOCKER_HOST=http://smocker:8081
+      # Azure Mock configuration (handles both ARM API and Blob Storage)
+      - AZURE_MOCK_ENDPOINT=http://azure-mock:8080
+      # ARM_ACCESS_KEY is required by azurerm backend to build auth headers
+      # (azure-mock ignores authentication, but SDK validates base64 format)
+      - ARM_ACCESS_KEY=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
+      # Azure credentials for mock (azurerm provider)
+      - ARM_CLIENT_ID=mock-client-id
+      - ARM_CLIENT_SECRET=mock-client-secret
+      - ARM_TENANT_ID=mock-tenant-id
+      - ARM_SUBSCRIPTION_ID=mock-subscription-id
+      - ARM_SKIP_PROVIDER_REGISTRATION=true
+      # Azure CLI service principal credentials (same as ARM_*)
+      - AZURE_CLIENT_ID=mock-client-id
+      - AZURE_CLIENT_SECRET=mock-client-secret
+      - AZURE_TENANT_ID=mock-tenant-id
+      - AZURE_SUBSCRIPTION_ID=mock-subscription-id
+      # Disable TLS verification for np CLI (talking to smocker)
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+      # Python/Azure CLI certificate configuration
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - AZURE_CLI_DISABLE_CONNECTION_VERIFICATION=1
+      - PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    extra_hosts:
+      # Redirect nullplatform API to smocker mock server (via nginx-proxy)
+      - "api.nullplatform.com:172.28.0.10"
+      # Redirect Azure APIs to azure-mock server (via nginx-proxy for HTTPS)
+      - "management.azure.com:172.28.0.10"
+      - "login.microsoftonline.com:172.28.0.10"
+      # Redirect Azure Blob Storage to azure-mock (via nginx-proxy for HTTPS)
+      - "devstoreaccount1.blob.core.windows.net:172.28.0.10"
+    volumes:
+      # Mount the project for tests
+      - ../..:/workspace
+      # Mount the TLS certificate for trusting smocker
+      - ./certs/cert.pem:/usr/local/share/ca-certificates/smocker.crt:ro
+    working_dir: /workspace
+    networks:
+      - integration-network
+
+networks:
+  integration-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  localstack-data:
