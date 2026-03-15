@@ -4,8 +4,8 @@
 #
 # Usage:
 #   ./testing/run_bats_tests.sh                    # Run all tests
-#   ./testing/run_bats_tests.sh frontend           # Run tests for frontend module only
-#   ./testing/run_bats_tests.sh frontend/deployment/tests  # Run specific test directory
+#   ./testing/run_bats_tests.sh static-files           # Run tests for static-files module only
+#   ./testing/run_bats_tests.sh static-files/deployment/tests  # Run specific test directory
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -141,7 +141,7 @@ if [ -n "$1" ]; then
     # Direct test directory path
     run_tests_in_dir "$1" || HAS_FAILURES=1
   elif [ -d "$1" ]; then
-    # Module name (e.g., "frontend") - find all test directories under it
+    # Module name (e.g., "static-files") - find all test directories under it
     module_test_dirs=$(find "$1" -mindepth 2 -maxdepth 2 -type d -name "tests" 2>/dev/null | sort)
     if [ -z "$module_test_dirs" ]; then
       echo -e "${RED}No test directories found in: $1${NC}"

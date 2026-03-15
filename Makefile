@@ -11,7 +11,7 @@ test:
 	@echo "  make test-integration  Run integration tests"
 	@echo ""
 	@echo "You can also run tests for a specific module:"
-	@echo "  make test-unit MODULE=frontend"
+	@echo "  make test-unit MODULE=static-files"
 
 # Run all tests
 test-all: test-unit test-tofu test-integration
@@ -50,5 +50,5 @@ help:
 	@echo "  test-integration  Run integration tests"
 	@echo ""
 	@echo "Options:"
-	@echo "  MODULE=<name>     Run tests for specific module (e.g., MODULE=frontend)"
+	@echo "  MODULE=<name>     Run tests for specific module (e.g., MODULE=static-files)"
 	@echo "  VERBOSE=1         Show output of passing tests (integration tests only)"
