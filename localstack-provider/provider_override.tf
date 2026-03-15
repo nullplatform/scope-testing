@@ -2,7 +2,7 @@
 # This file is copied into the module directory during integration tests
 # to configure the AWS provider to use mock endpoints
 #
-# LocalStack (port 4566): S3, Route53, STS, IAM, DynamoDB, ACM
+# LocalStack (port 4566): S3, Route53, STS, IAM, ACM
 # Moto (port 5000): CloudFront
 
 # Set CloudFront endpoint for AWS CLI commands (used by cache invalidation)
@@ -20,14 +20,13 @@ provider "aws" {
 
   endpoints {
     # LocalStack services (using Docker service name)
-    s3              = "http://localstack:4566"
-    route53         = "http://localstack:4566"
-    sts             = "http://localstack:4566"
-    iam             = "http://localstack:4566"
-    dynamodb        = "http://localstack:4566"
-    acm             = "http://localstack:4566"
+    s3      = "http://localstack:4566"
+    route53 = "http://localstack:4566"
+    sts     = "http://localstack:4566"
+    iam     = "http://localstack:4566"
+    acm     = "http://localstack:4566"
     # Moto services (CloudFront not in LocalStack free tier)
-    cloudfront      = "http://moto:5000"
+    cloudfront = "http://moto:5000"
   }
 
   default_tags {

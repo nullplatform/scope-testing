@@ -9,7 +9,7 @@
 #
 # Usage:
 #   ./testing/run_integration_tests.sh                    # Run all tests
-#   ./testing/run_integration_tests.sh frontend           # Run tests for frontend module only
+#   ./testing/run_integration_tests.sh static-files           # Run tests for static-files module only
 #   ./testing/run_integration_tests.sh --build            # Rebuild containers before running
 #   ./testing/run_integration_tests.sh -v|--verbose       # Show output of passing tests
 # =============================================================================

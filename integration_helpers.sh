@@ -157,7 +157,7 @@ _setup_aws() {
   TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_credentials_validation=true"
   TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_metadata_api_check=true"
   TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=skip_region_validation=true"
-  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=endpoints={s3=\"$LOCALSTACK_ENDPOINT\",dynamodb=\"$LOCALSTACK_ENDPOINT\"}"
+  TOFU_INIT_VARIABLES="$TOFU_INIT_VARIABLES -backend-config=endpoints={s3=\"$LOCALSTACK_ENDPOINT\"}"
   export TOFU_INIT_VARIABLES
 
   # Start containers if compose file exists
@@ -826,7 +826,7 @@ WORKFLOW EXECUTION
   run_workflow "<path/to/workflow.yaml>"
       Run a nullplatform workflow file.
       Path is relative to module root.
-      Example: run_workflow "frontend/deployment/workflows/initial.yaml"
+      Example: run_workflow "static-files/deployment/workflows/initial.yaml"
 
 CONTEXT HELPERS
 ---------------

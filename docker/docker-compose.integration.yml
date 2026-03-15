@@ -1,6 +1,6 @@
 services:
   # =============================================================================
-  # LocalStack - AWS services emulator (S3, Route53, DynamoDB, etc.)
+  # LocalStack - AWS services emulator (S3, Route53, etc.)
   # =============================================================================
   localstack:
     image: localstack/localstack:latest
@@ -9,7 +9,7 @@ services:
       - "4566:4566"
     environment:
       - DEBUG=0
-      - SERVICES=s3,route53,sts,iam,dynamodb,acm
+      - SERVICES=s3,route53,sts,iam,acm
       - DEFAULT_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test

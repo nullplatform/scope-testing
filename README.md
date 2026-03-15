@@ -29,9 +29,9 @@ make test-tofu          # OpenTofu infrastructure tests
 make test-integration   # End-to-end integration tests
 
 # Run tests for a specific module
-make test-unit MODULE=frontend
-make test-tofu MODULE=frontend
-make test-integration MODULE=frontend
+make test-unit MODULE=static-files
+make test-tofu MODULE=static-files
+make test-integration MODULE=static-files
 ```
 
 ---
@@ -121,12 +121,12 @@ make -C testing test-tofu
 make -C testing test-integration
 
 # Run tests for a specific module
-make -C testing test-unit MODULE=frontend
-make -C testing test-tofu MODULE=frontend
-make -C testing test-integration MODULE=frontend
+make -C testing test-unit MODULE=static-files
+make -C testing test-tofu MODULE=static-files
+make -C testing test-integration MODULE=static-files
 
 # Run a single test file directly
-bats frontend/deployment/tests/build_context_test.bats
+bats static-files/deployment/tests/build_context_test.bats
 tofu test  # from within a modules directory
 ```
 
@@ -208,12 +208,11 @@ setup() {
   # Initialize required environment variables
   export AWS_REGION="us-east-1"
   export TOFU_PROVIDER_BUCKET="my-terraform-state"
-  export TOFU_LOCK_TABLE="terraform-locks"
 }
 
 # Teardown - runs after each test
 teardown() {
-  unset AWS_REGION TOFU_PROVIDER_BUCKET TOFU_LOCK_TABLE
+  unset AWS_REGION TOFU_PROVIDER_BUCKET
 }
 
 # =============================================================================
@@ -403,7 +402,7 @@ Integration tests validate the complete deployment workflow end-to-end. They run
 │  │   LocalStack (4566)          Moto (5555)          Smocker (8081)       │ │
 │  │   ├── S3                     └── CloudFront       └── nullplatform API │ │
 │  │   ├── Route53                                                          │ │
-│  │   ├── DynamoDB                                                         │ │
+│  │   ├── ACM                                                              │ │
 │  │   ├── IAM                                                              │ │
 │  │   └── STS                                                              │ │
 │  │                                                                        │ │
@@ -416,7 +415,7 @@ Integration tests validate the complete deployment workflow end-to-end. They run
 
 | Service | Purpose | Port |
 |---------|---------|------|
-| **LocalStack** | AWS service emulation (S3, Route53, DynamoDB, IAM, STS, ACM) | 4566 |
+| **LocalStack** | AWS service emulation (S3, Route53, IAM, STS, ACM) | 4566 |
 | **Moto** | CloudFront emulation (not supported in LocalStack free tier) | 5555 |
 | **Smocker** | nullplatform API mocking | 8080/8081 |
 | **Nginx** | HTTPS reverse proxy for np CLI | 8443 |
@@ -460,11 +459,6 @@ setup_file() {
   # Create AWS prerequisites in LocalStack
   aws_local s3api create-bucket --bucket assets-bucket
   aws_local s3api create-bucket --bucket tofu-state-bucket
-  aws_local dynamodb create-table \
-    --table-name tofu-locks \
-    --attribute-definitions AttributeName=LockID,AttributeType=S \
-    --key-schema AttributeName=LockID,KeyType=HASH \
-    --billing-mode PAY_PER_REQUEST
   aws_local route53 create-hosted-zone \
     --name example.com \
     --caller-reference "test-$(date +%s)"
@@ -584,7 +578,6 @@ source testing/integration_helpers.sh && test_help
 | `assert_cloudfront_not_exists "$comment"` | Assert CloudFront distribution doesn't exist |
 | `assert_route53_record_exists "$name" "$type"` | Assert Route53 record exists |
 | `assert_route53_record_not_exists "$name" "$type"` | Assert Route53 record doesn't exist |
-| `assert_dynamodb_table_exists "$table"` | Assert DynamoDB table exists |
 
 ---
 
@@ -695,7 +688,7 @@ docker logs integration-localstack
 curl http://localhost:8081/history | jq
 
 # Run tests with verbose output
-bats --show-output-of-passing-tests frontend/deployment/tests/integration/*.bats
+bats --show-output-of-passing-tests static-files/deployment/tests/integration/*.bats
 ```
 
 ---

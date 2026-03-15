@@ -4,8 +4,8 @@
 #
 # Usage:
 #   ./testing/run_tofu_tests.sh                    # Run all tests
-#   ./testing/run_tofu_tests.sh frontend           # Run tests for frontend module only
-#   ./testing/run_tofu_tests.sh frontend/deployment/provider/aws/modules  # Run specific test directory
+#   ./testing/run_tofu_tests.sh static-files           # Run tests for static-files module only
+#   ./testing/run_tofu_tests.sh static-files/deployment/provider/aws/modules  # Run specific test directory
 # =============================================================================
 
 set -e
@@ -37,7 +37,7 @@ fi
 
 # Find all directories with .tftest.hcl files
 find_test_dirs() {
-  find . -name "*.tftest.hcl" -not -path "*/node_modules/*" 2>/dev/null | xargs -I{} dirname {} | sort -u
+  find . -name "*.tftest.hcl" -not -path "*/node_modules/*" -not -path "*/.terraform/*" 2>/dev/null | xargs -I{} dirname {} | sort -u
 }
 
 # Get module name from test path
@@ -86,7 +86,7 @@ if [ -n "$1" ]; then
     # Direct test directory path with .tftest.hcl files
     run_tests_in_dir "$1"
   elif [ -d "$1" ]; then
-    # Module name (e.g., "frontend") - find all test directories under it
+    # Module name (e.g., "static-files") - find all test directories under it
     module_test_dirs=$(find "$1" -name "*.tftest.hcl" 2>/dev/null | xargs -I{} dirname {} | sort -u)
     if [ -z "$module_test_dirs" ]; then
       echo -e "${RED}No OpenTofu test files found in: $1${NC}"
