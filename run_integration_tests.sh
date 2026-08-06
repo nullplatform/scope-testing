@@ -108,12 +108,12 @@ trap cleanup EXIT
 
 # Build test runner and azure-mock images if needed
 echo -e "${CYAN}Building containers...${NC}"
-docker compose -f "$COMPOSE_FILE" build $BUILD_FLAG test-runner azure-mock 2>&1 | grep -v "^$" || true
+docker compose -f "$COMPOSE_FILE" build $BUILD_FLAG test-runner azure-mock gcp-mock 2>&1 | grep -v "^$" || true
 echo ""
 
 # Start infrastructure services
 echo -e "${CYAN}Starting infrastructure services...${NC}"
-docker compose -f "$COMPOSE_FILE" up -d localstack moto azure-mock smocker nginx-proxy 2>&1 | grep -v "^$" || true
+docker compose -f "$COMPOSE_FILE" up -d localstack moto azure-mock gcp-mock fake-gcs-server smocker nginx-proxy 2>&1 | grep -v "^$" || true
 
 # Wait for services to be healthy
 echo -n "Waiting for services to be ready"
@@ -125,10 +125,12 @@ while [ $attempt -lt $max_attempts ]; do
   localstack_ok=$(curl -s "http://localhost:4566/_localstack/health" 2>/dev/null | jq -e '.services.s3 == "running"' >/dev/null 2>&1 && echo "yes" || echo "no")
   moto_ok=$(curl -s "http://localhost:5555/moto-api/" >/dev/null 2>&1 && echo "yes" || echo "no")
   azure_mock_ok=$(curl -s "http://localhost:8090/health" 2>/dev/null | jq -e '.status == "ok"' >/dev/null 2>&1 && echo "yes" || echo "no")
+  gcp_mock_ok=$(curl -s "http://localhost:8095/health" 2>/dev/null | jq -e '.status == "ok"' >/dev/null 2>&1 && echo "yes" || echo "no")
+  fake_gcs_ok=$(curl -s "http://localhost:4443/storage/v1/b?project=mock-project" >/dev/null 2>&1 && echo "yes" || echo "no")
   smocker_ok=$(curl -s "http://localhost:8081/version" >/dev/null 2>&1 && echo "yes" || echo "no")
   nginx_ok=$(curl -sk "https://localhost:8443/mocks" >/dev/null 2>&1 && echo "yes" || echo "no")
 
-  if [[ "$localstack_ok" == "yes" ]] && [[ "$moto_ok" == "yes" ]] && [[ "$azure_mock_ok" == "yes" ]] && [[ "$smocker_ok" == "yes" ]] && [[ "$nginx_ok" == "yes" ]]; then
+  if [[ "$localstack_ok" == "yes" ]] && [[ "$moto_ok" == "yes" ]] && [[ "$azure_mock_ok" == "yes" ]] && [[ "$gcp_mock_ok" == "yes" ]] && [[ "$fake_gcs_ok" == "yes" ]] && [[ "$smocker_ok" == "yes" ]] && [[ "$nginx_ok" == "yes" ]]; then
     echo ""
     echo -e "${GREEN}All services ready${NC}"
     break
