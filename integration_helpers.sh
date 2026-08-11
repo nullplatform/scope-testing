@@ -370,13 +370,79 @@ EOF
 # =============================================================================
 
 _setup_gcp() {
-  echo -e "${INTEGRATION_YELLOW}GCP provider setup not yet implemented${INTEGRATION_NC}"
-  echo "  Fake GCS Server endpoint would be configured here"
-  echo ""
+  export GCP_MOCK_ENDPOINT="${GCP_MOCK_ENDPOINT:-http://gcp-mock:8080}"
+  export STORAGE_EMULATOR_HOST="${STORAGE_EMULATOR_HOST:-http://fake-gcs-server:4443}"
+
+  # Create the tofu state bucket and the asset bucket in fake-gcs-server (idempotent).
+  local bucket
+  for bucket in "${GCP_STATE_BUCKET:-tofu-state}" "${GCP_ASSET_BUCKET:-assets-bucket}"; do
+    curl -s -X POST "${STORAGE_EMULATOR_HOST}/storage/v1/b?project=mock-project" \
+      -H 'Content-Type: application/json' -d "{\"name\":\"${bucket}\"}" >/dev/null 2>&1 || true
+  done
+
+  echo -e "  ${INTEGRATION_GREEN}GCP mock ready${INTEGRATION_NC} (${GCP_MOCK_ENDPOINT}, storage ${STORAGE_EMULATOR_HOST})"
 }
 
 _teardown_gcp() {
-  echo -e "${INTEGRATION_YELLOW}GCP provider teardown not yet implemented${INTEGRATION_NC}"
+  # The gcp-mock keeps state in memory only; it is discarded when the container stops.
+  return 0
+}
+
+# Query the gcp-mock REST API directly (used by the GCP assertions).
+gcp_mock() {
+  curl -s "${GCP_MOCK_ENDPOINT:-http://gcp-mock:8080}${1}"
+}
+
+# assert_gcp_function_exists <project> <location> <name>
+assert_gcp_function_exists() {
+  local out
+  out=$(gcp_mock "/cloudfunctions/v2/projects/$1/locations/$2/functions/$3")
+  if ! echo "$out" | jq -e '.state == "ACTIVE"' >/dev/null 2>&1; then
+    echo "Expected function '$3' to exist and be ACTIVE, got: $out"
+    return 1
+  fi
+}
+
+# assert_gcp_function_not_exists <project> <location> <name>
+assert_gcp_function_not_exists() {
+  local out
+  out=$(gcp_mock "/cloudfunctions/v2/projects/$1/locations/$2/functions/$3")
+  if echo "$out" | jq -e '.state == "ACTIVE"' >/dev/null 2>&1; then
+    echo "Expected function '$3' to be absent, but it exists: $out"
+    return 1
+  fi
+}
+
+# assert_gcp_backend_service_exists <project> <name>
+assert_gcp_backend_service_exists() {
+  local out
+  out=$(gcp_mock "/compute/v1/projects/$1/global/backendServices/$2")
+  if ! echo "$out" | jq -e '.id != null' >/dev/null 2>&1; then
+    echo "Expected backend service '$2' to exist, got: $out"
+    return 1
+  fi
+}
+
+# assert_gcp_global_address_ip <project> <name>  -> echoes the allocated IP
+assert_gcp_global_address_ip() {
+  local out ip
+  out=$(gcp_mock "/compute/v1/projects/$1/global/addresses/$2")
+  ip=$(echo "$out" | jq -r '.address // empty')
+  if [ -z "$ip" ]; then
+    echo "Expected global address '$2' to have an IP, got: $out"
+    return 1
+  fi
+  echo "$ip"
+}
+
+# assert_gcp_dns_record_exists <project> <zone> <name.> <type>
+assert_gcp_dns_record_exists() {
+  local out
+  out=$(gcp_mock "/dns/v1/projects/$1/managedZones/$2/rrsets?name=$3&type=$4")
+  if ! echo "$out" | jq -e '.rrsets | length > 0' >/dev/null 2>&1; then
+    echo "Expected DNS record '$3' ($4) to exist, got: $out"
+    return 1
+  fi
 }
 
 # =============================================================================

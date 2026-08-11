@@ -67,6 +67,38 @@ services:
         ipv4_address: 172.28.0.4
 
   # =============================================================================
+  # GCP Mock - Google Cloud REST API mock (Functions gen2, Run IAM, Compute LB, DNS, IAM)
+  # =============================================================================
+  gcp-mock:
+    build:
+      context: gcp-mock
+      dockerfile: Dockerfile
+    container_name: integration-gcp-mock
+    ports:
+      - "8095:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.5
+
+  # =============================================================================
+  # fake-gcs-server - Google Cloud Storage emulator (function source + tofu state)
+  # =============================================================================
+  fake-gcs-server:
+    image: fsouza/fake-gcs-server:latest
+    container_name: integration-fake-gcs
+    command: ["-scheme", "http", "-port", "4443", "-public-host", "fake-gcs-server:4443"]
+    ports:
+      - "4443:4443"
+    networks:
+      integration-network:
+        ipv4_address: 172.28.0.6
+
+  # =============================================================================
   # Smocker - API mock server for nullplatform API
   # =============================================================================
   smocker:
@@ -132,6 +164,16 @@ services:
       - SMOCKER_HOST=http://smocker:8081
       # Azure Mock configuration (handles both ARM API and Blob Storage)
       - AZURE_MOCK_ENDPOINT=http://azure-mock:8080
+      # GCP mock configuration (google provider custom endpoints + gcloud overrides)
+      - GCP_MOCK_ENDPOINT=http://gcp-mock:8080
+      - STORAGE_EMULATOR_HOST=http://fake-gcs-server:4443
+      - GOOGLE_OAUTH_ACCESS_TOKEN=mock-token
+      - CLOUDSDK_AUTH_ACCESS_TOKEN=mock-token
+      - CLOUDSDK_CORE_PROJECT=mock-project
+      - CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE=http://gcp-mock:8080/compute/v1/
+      - CLOUDSDK_API_ENDPOINT_OVERRIDES_RUN=http://gcp-mock:8080/run/v1/
+      - CLOUDSDK_API_ENDPOINT_OVERRIDES_DNS=http://gcp-mock:8080/dns/v1/
+      - CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDFUNCTIONS=http://gcp-mock:8080/cloudfunctions/v2/
       # ARM_ACCESS_KEY is required by azurerm backend to build auth headers
       # (azure-mock ignores authentication, but SDK validates base64 format)
       - ARM_ACCESS_KEY=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
