@@ -128,3 +128,27 @@ func TestDNSTXTRecordRoundTrip(t *testing.T) {
 		t.Fatalf("fqdn = %v", created["properties"])
 	}
 }
+
+func TestAFDRuleSetAcceptsEmptyBody(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	path := srv.URL + "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Cdn/profiles/shared-afd/ruleSets/rules1"
+	req, _ := http.NewRequest(http.MethodPut, path, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT status = %d", resp.StatusCode)
+	}
+
+	resp, got := doJSON(t, http.MethodGet, path, nil)
+	if resp.StatusCode != http.StatusOK || got["name"] != "rules1" {
+		t.Fatalf("GET status = %d name = %v", resp.StatusCode, got["name"])
+	}
+	if got["properties"].(map[string]interface{})["provisioningState"] != "Succeeded" {
+		t.Fatalf("properties = %v", got["properties"])
+	}
+}

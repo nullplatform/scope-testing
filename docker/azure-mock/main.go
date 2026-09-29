@@ -17,6 +17,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -3749,8 +3750,14 @@ func (s *Server) handleAFDResource(w http.ResponseWriter, r *http.Request, resou
 	case http.MethodPut, http.MethodPatch:
 		var body map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			s.badRequest(w, "Invalid request body")
-			return
+			if !errors.Is(err, io.EOF) {
+				s.badRequest(w, "Invalid request body")
+				return
+			}
+			body = map[string]interface{}{}
+		}
+		if body == nil {
+			body = map[string]interface{}{}
 		}
 
 		s.store.mu.Lock()
