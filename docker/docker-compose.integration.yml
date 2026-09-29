@@ -3,7 +3,7 @@ services:
   # LocalStack - AWS services emulator (S3, Route53, etc.)
   # =============================================================================
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3.8.1  # latest requires LOCALSTACK_AUTH_TOKEN
     container_name: integration-localstack
     ports:
       - "4566:4566"

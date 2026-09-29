@@ -3,7 +3,8 @@
 // A lightweight mock server that implements Azure REST API endpoints
 // for integration testing. Supports:
 //   - Azure CDN (profiles and endpoints)
-//   - Azure DNS (zones and CNAME records)
+//   - Azure Front Door Standard/Premium (endpoints, routes, origin groups, origins, rule sets, rules, custom domains, purge)
+//   - Azure DNS (zones, CNAME and TXT records)
 //   - Azure Storage Accounts (read-only for data source)
 //
 // Usage:
@@ -16,6 +17,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -52,6 +54,12 @@ type Store struct {
 	metricAlerts          map[string]MetricAlert
 	diagnosticSettings    map[string]DiagnosticSetting
 	trafficRouting        map[string][]TrafficRoutingRule
+	// Azure Front Door Standard/Premium: generic ARM documents keyed by
+	// lower-cased resource id. The provider only needs id/name/type,
+	// provisioningState and a handful of kind-specific properties back.
+	afdResources  map[string]map[string]interface{}
+	afdPurges     []AFDPurge
+	dnsTXTRecords map[string]DNSTXTRecord
 }
 
 // TrafficRoutingRule represents a traffic routing rule for a slot
@@ -82,6 +90,9 @@ func NewStore() *Store {
 		metricAlerts:           make(map[string]MetricAlert),
 		diagnosticSettings:     make(map[string]DiagnosticSetting),
 		trafficRouting:         make(map[string][]TrafficRoutingRule),
+		afdResources:           make(map[string]map[string]interface{}),
+		afdPurges:              []AFDPurge{},
+		dnsTXTRecords:          make(map[string]DNSTXTRecord),
 	}
 }
 
@@ -107,6 +118,7 @@ type CDNSku struct {
 type CDNProfileProps struct {
 	ResourceState     string `json:"resourceState"`
 	ProvisioningState string `json:"provisioningState"`
+	FrontDoorID       string `json:"frontDoorId,omitempty"`
 }
 
 // CDN Endpoint
@@ -185,6 +197,30 @@ type DNSZoneProps struct {
 }
 
 // DNS CNAME Record
+type AFDPurge struct {
+	EndpointID   string   `json:"endpointId"`
+	ContentPaths []string `json:"contentPaths"`
+	Domains      []string `json:"domains"`
+}
+
+type DNSTXTRecord struct {
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Type       string            `json:"type"`
+	Etag       string            `json:"etag,omitempty"`
+	Properties DNSTXTRecordProps `json:"properties"`
+}
+
+type DNSTXTRecordProps struct {
+	TTL        int           `json:"TTL"`
+	Fqdn       string        `json:"fqdn,omitempty"`
+	TXTRecords []DNSTXTValue `json:"TXTRecords"`
+}
+
+type DNSTXTValue struct {
+	Value []string `json:"value"`
+}
+
 type DNSCNAMERecord struct {
 	ID         string               `json:"id"`
 	Name       string               `json:"name"`
@@ -553,6 +589,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Route to appropriate handler
 	// Note: More specific routes must come first (operationresults before enableCustomHttps before customDomain, customDomain before endpoint)
 	switch {
+	case mockAFDPurgesRegex.MatchString(path):
+		s.handleMockAFDPurges(w, r)
+	case afdEndpointPurgeRegex.MatchString(path):
+		s.handleAFDPurge(w, r)
+	case afdRouteRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/afdEndpoints/routes")
+	case afdEndpointRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/afdEndpoints")
+	case afdOriginRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/originGroups/origins")
+	case afdOriginGroupRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/originGroups")
+	case afdRuleRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/ruleSets/rules")
+	case afdRuleSetRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/ruleSets")
+	case afdCustomDomainRegex.MatchString(path):
+		s.handleAFDResource(w, r, "Microsoft.Cdn/profiles/customDomains")
+	case dnsTXTRecordRegex.MatchString(path):
+		s.handleDNSTXTRecord(w, r)
 	case matchCDNOperationResults(path):
 		s.handleCDNOperationResults(w, r)
 	case matchCDNCustomDomainEnableHttps(path):
@@ -640,6 +696,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // =============================================================================
 
 var (
+	afdEndpointRegex      = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/afdEndpoints/[^/]+$`)
+	afdEndpointPurgeRegex = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/afdEndpoints/[^/]+/purge$`)
+	afdRouteRegex         = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/afdEndpoints/[^/]+/routes/[^/]+$`)
+	afdOriginGroupRegex   = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/originGroups/[^/]+$`)
+	afdOriginRegex        = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/originGroups/[^/]+/origins/[^/]+$`)
+	afdRuleSetRegex       = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/ruleSets/[^/]+$`)
+	afdRuleRegex          = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/ruleSets/[^/]+/rules/[^/]+$`)
+	afdCustomDomainRegex  = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Cdn/profiles/[^/]+/customDomains/[^/]+$`)
+	dnsTXTRecordRegex     = regexp.MustCompile(`(?i)/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Network/dnszones/[^/]+/TXT/[^/]+$`)
+	mockAFDPurgesRegex    = regexp.MustCompile(`^/mock/afd/purges$`)
+
 	subscriptionRegex         = regexp.MustCompile(`^/subscriptions/[^/]+$`)
 	listProvidersRegex        = regexp.MustCompile(`^/subscriptions/[^/]+/providers$`)
 	providerRegistrationRegex = regexp.MustCompile(`/subscriptions/[^/]+/providers/Microsoft\.[^/]+$`)
@@ -770,6 +837,7 @@ func (s *Server) handleCDNProfile(w http.ResponseWriter, r *http.Request) {
 			Properties: CDNProfileProps{
 				ResourceState:     "Active",
 				ProvisioningState: "Succeeded",
+				FrontDoorID:       "00000000-0000-0000-0000-00000000f00d",
 			},
 		}
 
@@ -3665,5 +3733,228 @@ func main() {
 
 	if err := http.ListenAndServe(":8080", server); err != nil {
 		log.Fatalf("Server failed: %v", err)
+	}
+}
+
+// =============================================================================
+// Azure Front Door Standard/Premium (generic ARM document handler)
+// =============================================================================
+
+func (s *Server) handleAFDResource(w http.ResponseWriter, r *http.Request, resourceType string) {
+	resourceID := r.URL.Path
+	key := strings.ToLower(resourceID)
+	parts := strings.Split(resourceID, "/")
+	name := parts[len(parts)-1]
+
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch:
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if !errors.Is(err, io.EOF) {
+				s.badRequest(w, "Invalid request body")
+				return
+			}
+			body = map[string]interface{}{}
+		}
+		if body == nil {
+			body = map[string]interface{}{}
+		}
+
+		s.store.mu.Lock()
+		doc := body
+		if r.Method == http.MethodPatch {
+			existing, ok := s.store.afdResources[key]
+			if !ok {
+				s.store.mu.Unlock()
+				s.resourceNotFound(w, resourceType, name)
+				return
+			}
+			for k, v := range body {
+				existing[k] = v
+			}
+			doc = existing
+		}
+		doc["id"] = resourceID
+		doc["name"] = name
+		doc["type"] = resourceType
+
+		props, _ := doc["properties"].(map[string]interface{})
+		if props == nil {
+			props = map[string]interface{}{}
+		}
+		props["provisioningState"] = "Succeeded"
+		props["deploymentStatus"] = "Succeeded"
+		switch resourceType {
+		case "Microsoft.Cdn/profiles/afdEndpoints":
+			props["hostName"] = fmt.Sprintf("%s-mock.z01.azurefd.net", name)
+			if _, ok := props["enabledState"]; !ok {
+				props["enabledState"] = "Enabled"
+			}
+		case "Microsoft.Cdn/profiles/customDomains":
+			props["domainValidationState"] = "Approved"
+			props["validationProperties"] = map[string]interface{}{
+				"validationToken": "mock-validation-token",
+				"expirationDate":  "2030-01-01T00:00:00.0000000Z",
+			}
+			if _, ok := props["tlsSettings"]; !ok {
+				props["tlsSettings"] = map[string]interface{}{
+					"certificateType":   "ManagedCertificate",
+					"minimumTlsVersion": "TLS12",
+				}
+			}
+		}
+		doc["properties"] = props
+		s.store.afdResources[key] = doc
+		s.store.mu.Unlock()
+
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusCreated)
+		}
+		json.NewEncoder(w).Encode(doc)
+
+	case http.MethodGet:
+		s.store.mu.RLock()
+		doc, exists := s.store.afdResources[key]
+		s.store.mu.RUnlock()
+		if !exists {
+			s.resourceNotFound(w, resourceType, name)
+			return
+		}
+		json.NewEncoder(w).Encode(doc)
+
+	case http.MethodDelete:
+		s.store.mu.Lock()
+		delete(s.store.afdResources, key)
+		// Children go with the parent (routes with an endpoint, origins with a group, rules with a set)
+		for k := range s.store.afdResources {
+			if strings.HasPrefix(k, key+"/") {
+				delete(s.store.afdResources, k)
+			}
+		}
+		s.store.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+
+	default:
+		s.methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleAFDPurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.methodNotAllowed(w)
+		return
+	}
+	endpointID := strings.TrimSuffix(r.URL.Path, "/purge")
+
+	var req struct {
+		ContentPaths []string `json:"contentPaths"`
+		Domains      []string `json:"domains"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.ContentPaths) == 0 {
+		s.badRequest(w, "contentPaths is required")
+		return
+	}
+
+	s.store.mu.Lock()
+	_, exists := s.store.afdResources[strings.ToLower(endpointID)]
+	if exists {
+		s.store.afdPurges = append(s.store.afdPurges, AFDPurge{
+			EndpointID: endpointID, ContentPaths: req.ContentPaths, Domains: req.Domains,
+		})
+	}
+	s.store.mu.Unlock()
+
+	if !exists {
+		s.resourceNotFound(w, "Front Door Endpoint", endpointID)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// GET lists recorded purges, DELETE clears them. Test-only introspection.
+func (s *Server) handleMockAFDPurges(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.store.mu.RLock()
+		purges := append([]AFDPurge{}, s.store.afdPurges...)
+		s.store.mu.RUnlock()
+		json.NewEncoder(w).Encode(purges)
+	case http.MethodDelete:
+		s.store.mu.Lock()
+		s.store.afdPurges = []AFDPurge{}
+		s.store.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	default:
+		s.methodNotAllowed(w)
+	}
+}
+
+// =============================================================================
+// DNS TXT Record Handler
+// =============================================================================
+
+func (s *Server) handleDNSTXTRecord(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	parts := strings.Split(path, "/")
+
+	subscriptionID := parts[2]
+	resourceGroup := parts[4]
+	zoneName := parts[8]
+	recordName := parts[10]
+
+	resourceID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/dnszones/%s/TXT/%s",
+		subscriptionID, resourceGroup, zoneName, recordName)
+
+	switch r.Method {
+	case http.MethodPut:
+		var req struct {
+			Properties DNSTXTRecordProps `json:"properties"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.badRequest(w, "Invalid request body")
+			return
+		}
+		if len(req.Properties.TXTRecords) == 0 {
+			s.badRequest(w, "TXTRecords is required")
+			return
+		}
+
+		record := DNSTXTRecord{
+			ID:   resourceID,
+			Name: recordName,
+			Type: "Microsoft.Network/dnszones/TXT",
+			Etag: fmt.Sprintf("etag-%d", time.Now().Unix()),
+			Properties: DNSTXTRecordProps{
+				TTL:        req.Properties.TTL,
+				Fqdn:       fmt.Sprintf("%s.%s.", recordName, zoneName),
+				TXTRecords: req.Properties.TXTRecords,
+			},
+		}
+
+		s.store.mu.Lock()
+		s.store.dnsTXTRecords[resourceID] = record
+		s.store.mu.Unlock()
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(record)
+
+	case http.MethodGet:
+		s.store.mu.RLock()
+		record, exists := s.store.dnsTXTRecords[resourceID]
+		s.store.mu.RUnlock()
+		if !exists {
+			s.resourceNotFound(w, "DNS TXT Record", recordName)
+			return
+		}
+		json.NewEncoder(w).Encode(record)
+
+	case http.MethodDelete:
+		s.store.mu.Lock()
+		delete(s.store.dnsTXTRecords, resourceID)
+		s.store.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+
+	default:
+		s.methodNotAllowed(w)
 	}
 }
